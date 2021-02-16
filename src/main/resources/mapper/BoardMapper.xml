@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD Mapper 3.0//EN" "http://ibatis.apache.org/dtd/ibatis-3-mapper.dtd">
+<mapper namespace="com.won.dokky.board.mapper.BoardMapper">
+
+
+<!-- 게시물 조회수 -->
+	<update id="plusCnt" parameterType="String">
+	  UPDATE BOARD SET 
+	  CNT = CNT + 1 
+	  WHERE SEQ = #{seq}
+	</update>
+
+<!-- 가장 최근 게시물 seq 번호 조회 -->
+<select id="boardMaxSeq" resultType="String">
+	SELECT max(seq)
+	FROM board
+</select>
+
+<!-- 작성자별 게시물 리스트 -->
+<select id="writerBoardList" resultType="BoardVO" parameterType="SearchCriteria">
+        SELECT *
+		FROM (
+		        SELECT    ROW_NUMBER() OVER (ORDER BY regdate DESC) rnum , result.*
+		          FROM	(
+			          		SELECT  writer, regdate, seq seq, title, category, 'N' rseq, content
+			                FROM board
+			                 WHERE  writer = #{memId}
+			                
+			                UNION ALL
+			                
+			                SELECT  b.writer, br.regdate, b.seq seq, title, category,  NVL2(rseq,'Y','N') rseq, br.content
+			                FROM boardReply br JOIN board b ON br.seq=b.seq
+			                WHERE  br.writer = #{memId}
+		                ) result
+		     )
+         WHERE rnum BETWEEN #{rowStart} AND #{rowEnd}
+</select>
+
+<!-- 작성자별 게시물 리스트 갯수 -->
+<select id="writerBoardListCount" resultType="int" parameterType="SearchCriteria">
+			SELECT count(*)
+			FROM(
+			        SELECT  writer, seq
+					FROM 	board 
+					WHERE 	writer = #{memId}
+							
+			                UNION ALL
+			        
+			        SELECT  writer, seq
+			        FROM 	boardReply 
+			        WHERE 	writer= #{memId}
+				 )
+			 WHERE <![CDATA[ seq>0]]>
+</select> 
+
+
+<!-- 게시물 리스트 -->
+	<select id="list" resultType="BoardVO" parameterType="SearchCriteria">
+		SELECT  *
+ 			FROM (   SELECT  ROW_NUMBER() OVER(ORDER BY b.seq DESC) AS RNUM
+	                      	 ,b.*  <if test='tagName!=null'>, tagname</if>
+			         FROM board b <if test='tagName !=null'>
+			         			  JOIN board_hashtag bh ON (b.seq=bh.seq)
+			         			  JOIN hashtag h ON (h.tagid=bh.tagid)
+			         			  </if>
+			         WHERE 1=1
+			         <include refid="search"></include>
+			         <include refid="category"></include>
+			         <if test='memId !=null'>AND writer = #{memId}</if>
+			      <if test='tagName !=null'>AND UPPER(tagName)=UPPER(#{tagName})</if>  
+			       )
+        WHERE RNUM BETWEEN #{rowStart} AND #{rowEnd}
+		ORDER BY seq DESC
+		
+	</select>
+			
+<!-- 게시물 리스트 갯수 -->
+	<select id="listCount" resultType="int" parameterType="SearchCriteria">
+			
+				SELECT count(b.seq)
+				FROM board b 	  <if test='tagName !=null'>
+			         			  JOIN board_hashtag bh ON (b.seq=bh.seq)
+			         			  JOIN hashtag h ON (h.tagid=bh.tagid)
+			         			  </if>
+				WHERE 1=1
+				<include refid="search"></include>	
+				<include refid="category"></include>
+				 <if test='tagName !=null'>AND UPPER(tagname)=UPPER(#{tagName})</if>  
+			<![CDATA[AND b.seq>0]]>
+			</select>
+
+<!--  게시글 등록 -->
+	<insert id="boardInsert" parameterType="BoardVO" useGeneratedKeys="true" keyProperty="seq">
+		<selectKey keyProperty="seq" resultType="String" order="BEFORE">
+			SELECT BOARD_SEQ.NEXTVAL FROM DUAL
+		</selectKey>
+		
+		INSERT INTO board(
+		seq, 
+		title,
+		writer,
+		content,
+		regdate,
+		category
+		)
+		VALUES(
+		#{seq},
+		#{title, jdbcType=VARCHAR},
+		#{writer, jdbcType=VARCHAR},
+		#{content, jdbcType=VARCHAR},
+		TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS'),
+		#{category, jdbcType=VARCHAR}
+		)
+	</insert>
+	
+<!-- 게시물 수정 -->
+	<update id="boardModify"  parameterType="BoardVO">
+		UPDATE board 
+		<set>
+		<if test="category !=null">category= #{category}, </if>
+		<if test="title !=null">title= #{title}, 		</if> 
+		<if test="content !=null">content= #{content}, </if>
+								  modidate= TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS')  
+		</set>					  
+			WHERE seq = #{seq}		
+	</update>
+
+<!-- 게시물 삭제 -->
+	<delete id="boardDelete" parameterType="BoardVO">
+		DELETE board
+		WHERE seq = #{seq}
+	</delete>
+
+<!-- 게시물 삭제할 때 하위 댓글 먼저 삭제 쿼리 -->
+	<delete id="boardRepliesDelete" parameterType="BoardVO">
+		DELETE boardReply
+		WHERE seq = #{seq}
+	</delete>
+
+<!-- 게시물 내용 단건조회 -->
+<select id="selectBoard" parameterType="BoardVO" resultType="BoardVO">
+	SELECT *
+	FROM   board
+	WHERE seq =#{seq}
+	
+
+</select>
+
+
+
+<!-- @@@@@@@@  메인 페이지  @@@@@@@@@@ -->
+<!-- 커뮤니티 -->
+<select id="boardCummunity"	 resultType="BoardVO">
+	SELECT seq, title, writer, regdate
+	FROM ( SELECT *
+			FROM  board
+			WHERE category ='daily' or category='notice'
+			ORDER BY regdate desc)
+	WHERE rownum 	<![CDATA[ <=]]> 10
+</select>
+
+<!--  Q/A-->
+<select id="boardQandA"	 resultType="BoardVO">
+	SELECT * 
+	FROM ( SELECT * 
+			FROM  board
+			WHERE category ='tech' or category='job'
+			ORDER BY regdate desc)
+	WHERE rownum 	<![CDATA[ <=]]> 5
+</select>
+
+<!--  해쉬태그 -->
+<select id="boardHashTags"	 resultType="HashTagVO">
+	  SELECT *
+ 			 FROM (
+			          SELECT  h.tagid, count(*) AS tagname_count, tagname
+			          FROM board_hashtag bh join hashtag h on bh.tagid=h.tagid
+			          GROUP BY h.tagid, tagname
+			          ORDER BY tagname_count desc) 
+		WHERE rownum <![CDATA[ <=]]> 20
+</select>
+<!-- @@@@@@@@  메인 페이지 끝 @@@@@@@@@ -->
+
+
+
+
+<!-- @@@@@@@@  첨부파일 @@@@@@@@@ -->
+<!-- 첨부파일등록 -->
+ <insert id="insertFile" parameterType="hashMap">
+		INSERT INTO board_file (
+			FILE_NO,
+			SEQ,
+			ORG_FILE_NAME,
+			STORED_FILE_NAME,
+			FILE_SIZE
+		)VALUES(
+			seq_mp_file_no.NEXTVAL,
+			#{SEQ},
+			#{ORG_FILE_NAME},
+			#{STORED_FILE_NAME},
+			#{FILE_SIZE}
+		)
+    </insert>
+
+<!-- 첨부파일 조회 -->
+<select id="selectFileList" parameterType="String" resultType="hashMap">
+	SELECT FILE_NO,
+		   ORG_FILE_NAME,
+		   ROUND(FILE_SIZE/1024,1) AS FILE_SIZE
+	  FROM BOARD_FILE
+	 WHERE SEQ = #{SEQ}
+	   AND DEL_GB = 'N'
+	  ORDER BY FILE_NO ASC
+</select>
+
+<!-- 첨부파일 다운 -->
+<select id="selectFileInfo" parameterType="hashMap" resultType="hashMap">
+	SELECT 
+		STORED_FILE_NAME,
+		ORG_FILE_NAME
+	FROM BOARD_FILE
+	WHERE FILE_NO = #{FILE_NO}
+</select>
+
+<!-- 첨부파일 수정 -->
+ <update id="updateFile" parameterType="hashMap">
+    	UPDATE BOARD_FILE SET
+    			DEL_GB = 'Y'
+    	WHERE FILE_NO = #{FILE_NO}
+    </update>
+<!-- @@@@@@@@  첨부파일 끝 @@@@@@@@@ -->
+    
+    
+    
+    
+    
+<!-- SQL 조각 모음 -->	
+	<sql id="category">
+		<if test="category !=null">
+			<choose>
+				<when test='category =="notice"'>
+					AND  category = 'notice'
+				</when>
+				<when test='category =="daily"'>
+					AND  category = 'daily'
+				</when>
+				<when test='category =="tech"'>
+					AND  category = 'tech'
+				</when>
+				<when test='category =="job"'>
+					AND  category = 'job'
+				</when>
+				<when test='category =="communityAll"'> 
+					AND  (category = 'daily' or category = 'notice')
+				</when>
+				<when test='category =="qnaAll"'>
+					AND  (category = 'tech' or category = 'job')
+				</when>
+			</choose>  
+		</if>	
+	</sql>
+	
+	<sql id="search">
+		<if test="searchType != null">
+			<if test="searchType == 't'.toString()">AND TITLE LIKE '%' || #{keyword} || '%'</if>
+			<if test="searchType == 'c'.toString()">AND CONTENT LIKE '%' || #{keyword} || '%'</if>
+			<if test="searchType == 'w'.toString()">AND WRITER LIKE '%' || #{keyword} || '%'</if>
+			<if test="searchType == 'tc'.toString()">AND (TITLE LIKE '%' || #{keyword} || '%') or (CONTENT LIKE '%' || #{keyword} || '%')</if>
+		</if>
+	</sql>
+
+
+
+
+</mapper>
